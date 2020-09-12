@@ -19,6 +19,7 @@ package org.springframework.context.annotation;
 import java.util.function.Supplier;
 
 import org.springframework.beans.factory.config.BeanDefinitionCustomizer;
+import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanNameGenerator;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.context.support.GenericApplicationContext;
@@ -63,7 +64,19 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	 * through {@link #register} calls and then manually {@linkplain #refresh refreshed}.
 	 */
 	public AnnotationConfigApplicationContext() {
+		/**
+		 * 初始化一个注解的读取器，传入参数是当前上下文对象{@link AnnotationConfigApplicationContext}
+		 * springboot启动过程中创建的上下文对象是{@link AnnotationConfigServletWebServerApplicationContext}，该实例通过反射构建，初始化步骤中也会初始化下面两面实例，作用基本一样
+		 * @see AnnotatedBeanDefinitionReader#AnnotatedBeanDefinitionReader(BeanDefinitionRegistry)
+		 */
 		this.reader = new AnnotatedBeanDefinitionReader(this);
+		/**
+		 * 初始化一个扫描器，用来处理类路径中bean的候选者
+		 * @see org.springframework.stereotype.Component
+		 * @see org.springframework.stereotype.Repository
+		 * @see org.springframework.stereotype.Service
+		 * @see org.springframework.stereotype.Controller
+		 */
 		this.scanner = new ClassPathBeanDefinitionScanner(this);
 	}
 
@@ -159,6 +172,10 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	@Override
 	public void register(Class<?>... componentClasses) {
 		Assert.notEmpty(componentClasses, "At least one component class must be specified");
+		/**
+		 * 注册一个或多个待处理的组件类
+		 * @see AnnotatedBeanDefinitionReader#registerBean(Class)
+		 */
 		this.reader.register(componentClasses);
 	}
 

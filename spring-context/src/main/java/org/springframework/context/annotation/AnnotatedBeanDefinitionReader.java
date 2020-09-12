@@ -20,6 +20,8 @@ import java.lang.annotation.Annotation;
 import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.AnnotatedGenericBeanDefinition;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanDefinitionCustomizer;
 import org.springframework.beans.factory.config.BeanDefinitionHolder;
@@ -27,9 +29,14 @@ import org.springframework.beans.factory.support.AutowireCandidateQualifier;
 import org.springframework.beans.factory.support.BeanDefinitionReaderUtils;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanNameGenerator;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.event.EventListener;
+import org.springframework.context.event.EventListenerFactory;
+import org.springframework.context.support.AbstractApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.EnvironmentCapable;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
 
@@ -68,6 +75,32 @@ public class AnnotatedBeanDefinitionReader {
 	 * @see #setEnvironment(Environment)
 	 */
 	public AnnotatedBeanDefinitionReader(BeanDefinitionRegistry registry) {
+		/**
+		 * @see #getOrCreateEnvironment(BeanDefinitionRegistry) 从当前{@link BeanDefinitionRegistry}获取应用环境
+		 * @see Environment 若没有，就创建一个{@link StandardEnvironment}
+		 * {@link AbstractApplicationContext#getEnvironment()}
+		 *
+		 * 创建一个{@link ConditionEvaluator.ConditionContextImpl}实例,初始化一些参数[bean工厂，环境，类加载器，资源加载器等]
+		 *
+		 * 在bean工厂中注册几个注解相关的后处理器(不是实例化,仅仅是注册)
+		 * @see AnnotationConfigUtils#registerAnnotationConfigProcessors(BeanDefinitionRegistry)
+		 * {@link org.springframework.beans.factory.support.DefaultListableBeanFactory#registerBeanDefinition(String, BeanDefinition)}
+		 *
+		 * {@link org.springframework.context.annotation.ConfigurationClassPostProcessor}
+		 * 处理{@link Configuration @Configuration}注解类
+		 *
+		 * {@link org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor}
+		 * 默认情况下，处理{@link Autowired @Autowired} and {@link Value @Value}成员信息
+		 *
+		 * {@link org.springframework.context.annotation.CommonAnnotationBeanPostProcessor}
+		 * 支持{@code javax.annotation}包下的Java注解，例如{@link javax.annotation.PreDestroy},{@link javax.annotation.PostConstruct},{@link javax.annotation.Resource}等
+		 *
+		 * {@link org.springframework.context.event.EventListenerMethodProcessor}
+		 * 将{@link EventListener}注解的方法注册为{@link ApplicationListener}的实例
+		 *
+		 * {@link org.springframework.context.event.DefaultEventListenerFactory}
+		 * 它是{@link EventListenerFactory}的默认实现类，完成对{@link EventListener}注解的支持功能
+		 */
 		this(registry, getOrCreateEnvironment(registry));
 	}
 
@@ -251,15 +284,36 @@ public class AnnotatedBeanDefinitionReader {
 			@Nullable BeanDefinitionCustomizer[] customizers) {
 
 		AnnotatedGenericBeanDefinition abd = new AnnotatedGenericBeanDefinition(beanClass);
+		/**
+		 * @see ConditionEvaluator#shouldSkip(AnnotatedTypeMetadata, ConfigurationCondition.ConfigurationPhase)
+		 * 处理是否需要忽略该注册过程，根据{@link Conditional}注解来判断解析
+		 * 条件参考{@link Condition}
+		 */
 		if (this.conditionEvaluator.shouldSkip(abd.getMetadata())) {
 			return;
 		}
-
+		/**
+		 * 指定用于创建bean实例的回调，替代声明式指定的工厂方法
+		 * 如果设置了回调，它将覆盖任何其他构造函数或工厂方法元数据
+		 * 但是，bean属性填充和潜在的注释驱动的注入仍将照常应用
+		 */
 		abd.setInstanceSupplier(supplier);
+		/**
+		 * 描述Spring管理的bean的范围特征，包括范围名称和范围代理行为
+		 * 默认范围名称是“singleton”，默认是不创建作用域代理
+		 */
 		ScopeMetadata scopeMetadata = this.scopeMetadataResolver.resolveScopeMetadata(abd);
 		abd.setScope(scopeMetadata.getScopeName());
 		String beanName = (name != null ? name : this.beanNameGenerator.generateBeanName(abd, this.registry));
 
+		/**
+		 * 给abd设置相关注解(5个)属性(如果存在的话)
+		 * @see Primary 在同一个上下文中同一基类下被此注解注释的类具有更高的优先级被注入
+		 * @see Lazy
+		 * @see Description
+		 * @see Role
+		 * @see DependsOn
+		 */
 		AnnotationConfigUtils.processCommonDefinitionAnnotations(abd);
 		if (qualifiers != null) {
 			for (Class<? extends Annotation> qualifier : qualifiers) {
@@ -274,14 +328,26 @@ public class AnnotatedBeanDefinitionReader {
 				}
 			}
 		}
+		/**
+		 * 用于自定义给定bean定义的回调
+		 * @see BeanDefinitionCustomizer
+		 */
 		if (customizers != null) {
 			for (BeanDefinitionCustomizer customizer : customizers) {
 				customizer.customize(abd);
 			}
 		}
-
+		//包装
 		BeanDefinitionHolder definitionHolder = new BeanDefinitionHolder(abd, beanName);
+		/**
+		 * 应用作用域代理模式(默认式不创建作用域代理)
+		 * @see ScopedProxyMode.NO
+		 */
 		definitionHolder = AnnotationConfigUtils.applyScopedProxyMode(scopeMetadata, definitionHolder, this.registry);
+		/**
+		 * 注册
+		 * @see org.springframework.beans.factory.support.DefaultListableBeanFactory#registerBeanDefinition(String, BeanDefinition)
+		 */
 		BeanDefinitionReaderUtils.registerBeanDefinition(definitionHolder, this.registry);
 	}
 
