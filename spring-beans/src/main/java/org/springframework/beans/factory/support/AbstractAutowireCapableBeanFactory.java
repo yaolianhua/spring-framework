@@ -485,6 +485,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		// Make sure bean class is actually resolved at this point, and
 		// clone the bean definition in case of a dynamically resolved Class
 		// which cannot be stored in the shared merged bean definition.
+		/**
+		 * 确保此时确实解析了bean类，并且在动态解析的类的情况下克隆bean定义
+		 * 在共享的合并bean定义中无法存储
+		 */
 		Class<?> resolvedClass = resolveBeanClass(mbd, beanName);
 		if (resolvedClass != null && !mbd.hasBeanClass() && mbd.getBeanClassName() != null) {
 			mbdToUse = new RootBeanDefinition(mbd);
@@ -493,6 +497,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		// Prepare method overrides.
 		try {
+			//验证并准备为此bean定义的方法替代。检查是否存在具有指定名称的方法
 			mbdToUse.prepareMethodOverrides();
 		}
 		catch (BeanDefinitionValidationException ex) {
@@ -502,7 +507,20 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		try {
 			// Give BeanPostProcessors a chance to return a proxy instead of the target bean instance.
+			/**
+			 * 给BeanPostProcessors一个返回代理而不是目标bean实例的机会
+			 *
+			 * 在bean实例化(Instantiation)[需要区别于初始化(Initialization)]之前应用beanPostProcessor后置处理器
+			 * @see #resolveBeforeInstantiation(String, RootBeanDefinition)
+			 * @see #applyBeanPostProcessorsBeforeInstantiation(Class, String)
+			 * 若自己实现了{@link InstantiationAwareBeanPostProcessor#postProcessBeforeInstantiation(Class, String)}接口方法，且返回bean不为null
+			 * 则下面的后置处理才会被调用{@link BeanPostProcessor#postProcessAfterInitialization(Object, String)}
+			 * @see #applyBeanPostProcessorsAfterInitialization(Object, String)
+			 */
 			Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
+			/**
+			 * 若过bean不为null,直接返回，后面所哟步骤跳过
+			 */
 			if (bean != null) {
 				return bean;
 			}
@@ -548,11 +566,23 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			throws BeanCreationException {
 
 		// Instantiate the bean.
+		//bean包装
 		BeanWrapper instanceWrapper = null;
 		if (mbd.isSingleton()) {
+			//未完成的FactoryBean实例的缓存：BeanWrapper的FactoryBean名称
 			instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
 		}
 		if (instanceWrapper == null) {
+			/**
+			 * 创建bean实例,使用到下面的后置处理器推断构造函数
+			 * {@link org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#determineCandidateConstructors(Class, String)}
+			 *
+			 * 1. 若指定过工厂方法，则通过工厂方法创建
+			 * @see #instantiateUsingFactoryMethod(String, RootBeanDefinition, Object[])
+			 * 2. 若有指定构造器函数，则通过指定构造函数创建
+			 * @see #instantiateBean(String, RootBeanDefinition)
+			 * @see BeanUtils#instantiateClass(Constructor, Object...)
+			 */
 			instanceWrapper = createBeanInstance(beanName, mbd, args);
 		}
 		Object bean = instanceWrapper.getWrappedInstance();
@@ -565,6 +595,12 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		synchronized (mbd.postProcessingLock) {
 			if (!mbd.postProcessed) {
 				try {
+					/**
+					 * 允许后处理器修改合并的bean定义
+					 * @see org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#postProcessMergedBeanDefinition(RootBeanDefinition, Class, String)
+					 * @see org.springframework.context.annotation.CommonAnnotationBeanPostProcessor#postProcessMergedBeanDefinition(RootBeanDefinition, Class, String)
+					 * @see org.springframework.context.support.ApplicationListenerDetector#postProcessMergedBeanDefinition(RootBeanDefinition, Class, String)
+					 */
 					applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
 				}
 				catch (Throwable ex) {
@@ -584,13 +620,52 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 				logger.trace("Eagerly caching bean '" + beanName +
 						"' to allow for resolving potential circular references");
 			}
+			/**
+			 * 获取有关早期访问指定bean，通常用于解决循环引用的目的
+			 * @see org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#getEarlyBeanReference(Object, String)
+			 */
 			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
 		}
 
 		// Initialize the bean instance.
 		Object exposedObject = bean;
 		try {
+			/**
+			 * bean属性填充
+			 * @see org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#post
+			 *
+			 * 注入
+			 * @see AutowireCapableBeanFactory#AUTOWIRE_NO (默认使用类型)
+			 * @see AutowireCapableBeanFactory#AUTOWIRE_BY_NAME
+			 * @see AutowireCapableBeanFactory#AUTOWIRE_BY_TYPE
+			 *
+			 * @see org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#postProcessProperties(PropertyValues, Object, String)
+			 * 处理{@link org.springframework.beans.factory.annotation.Autowired}属性注入
+			 *
+			 * @see org.springframework.context.annotation.CommonAnnotationBeanPostProcessor#postProcessProperties(PropertyValues, Object, String)
+			 * 处理{@link javax.annotation.Resource} 属性注入
+			 *
+			 * @see org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor#postProcessProperties(PropertyValues, Object, String)
+			 */
 			populateBean(beanName, mbd, instanceWrapper);
+			/**
+			 * 初始化给定bean实例
+			 * @see org.springframework.context.support.ApplicationContextAwareProcessor#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.context.support.ApplicationListenerDetector#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor#postProcessBeforeInitialization(Object, String)
+			 * 处理生命周期方法{@link javax.annotation.PostConstruct},{@link javax.annotation.PreDestroy}
+			 * @see org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessorAdapter#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.context.support.PostProcessorRegistrationDelegate.BeanPostProcessorChecker#postProcessBeforeInitialization(Object, String)
+			 *
+			 *
+			 * @see org.springframework.context.support.ApplicationContextAwareProcessor#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.context.support.ApplicationListenerDetector#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessorAdapter#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.context.support.PostProcessorRegistrationDelegate.BeanPostProcessorChecker#postProcessAfterInitialization(Object, String)
+			 */
 			exposedObject = initializeBean(beanName, exposedObject, mbd);
 		}
 		catch (Throwable ex) {
@@ -1173,6 +1248,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		if (mbd.getFactoryMethodName() != null) {
+			/**
+			 * 使用工厂方法实例化bean
+			 * @see #instantiateUsingFactoryMethod(String, RootBeanDefinition, Object[])
+			 */
 			return instantiateUsingFactoryMethod(beanName, mbd, args);
 		}
 
@@ -1197,6 +1276,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		// Candidate constructors for autowiring?
+		/**
+		 * 通过后置处理器选出自动装配的构造器函数[很复杂]
+		 * @see org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#determineCandidateConstructors(Class, String)
+		 */
 		Constructor<?>[] ctors = determineConstructorsFromBeanPostProcessors(beanClass, beanName);
 		if (ctors != null || mbd.getResolvedAutowireMode() == AUTOWIRE_CONSTRUCTOR ||
 				mbd.hasConstructorArgumentValues() || !ObjectUtils.isEmpty(args)) {
@@ -1204,12 +1287,17 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		// Preferred constructors for default construction?
+		//确定用于默认构造的首选构造函数（如果有）。如有必要，构造函数参数将自动装配[默认为[null]
 		ctors = mbd.getPreferredConstructors();
 		if (ctors != null) {
 			return autowireConstructor(beanName, mbd, ctors, null);
 		}
 
 		// No special handling: simply use no-arg constructor.
+		/**
+		 * 无特殊处理，则使用无参构造器来实例化bean
+		 * @see BeanUtils#instantiateClass(Constructor, Object...)
+		 */
 		return instantiateBean(beanName, mbd);
 	}
 
@@ -1392,6 +1480,12 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		PropertyValues pvs = (mbd.hasPropertyValues() ? mbd.getPropertyValues() : null);
 
+		/**
+		 * 属性注入类型
+		 * @see AutowireCapableBeanFactory#AUTOWIRE_NO (默认使用类型)
+		 * @see AutowireCapableBeanFactory#AUTOWIRE_BY_NAME
+		 * @see AutowireCapableBeanFactory#AUTOWIRE_BY_TYPE
+		 */
 		int resolvedAutowireMode = mbd.getResolvedAutowireMode();
 		if (resolvedAutowireMode == AUTOWIRE_BY_NAME || resolvedAutowireMode == AUTOWIRE_BY_TYPE) {
 			MutablePropertyValues newPvs = new MutablePropertyValues(pvs);
@@ -1416,6 +1510,15 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			}
 			for (BeanPostProcessor bp : getBeanPostProcessors()) {
 				if (bp instanceof InstantiationAwareBeanPostProcessor) {
+					/**
+					 * @see org.springframework.beans.factory.annotation.AutowiredAnnotationBeanPostProcessor#postProcessProperties(PropertyValues, Object, String)
+					 * 处理{@link org.springframework.beans.factory.annotation.Autowired}属性注入
+					 *
+					 * @see org.springframework.context.annotation.CommonAnnotationBeanPostProcessor#postProcessProperties(PropertyValues, Object, String)
+					 * 处理{@link javax.annotation.Resource} 属性注入
+					 *
+					 * @see org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor#postProcessProperties(PropertyValues, Object, String)
+					 */
 					InstantiationAwareBeanPostProcessor ibp = (InstantiationAwareBeanPostProcessor) bp;
 					PropertyValues pvsToUse = ibp.postProcessProperties(pvs, bw.getWrappedInstance(), beanName);
 					if (pvsToUse == null) {
@@ -1439,6 +1542,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		if (pvs != null) {
+			/**
+			 * 应用给定的属性值，解析所有运行时引用bean工厂中的其他bean。必须使用深拷贝，所以我们
+			 * 不要永久的修改此属性
+			 */
 			applyPropertyValues(beanName, mbd, bw, pvs);
 		}
 	}
@@ -1783,6 +1890,16 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		Object wrappedBean = bean;
 		if (mbd == null || !mbd.isSynthetic()) {
+			/**
+			 * @see org.springframework.context.support.ApplicationContextAwareProcessor#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.context.support.ApplicationListenerDetector#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor#postProcessBeforeInitialization(Object, String)
+			 * 处理生命周期方法{@link javax.annotation.PostConstruct},{@link javax.annotation.PreDestroy}
+			 *
+			 * @see org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessorAdapter#postProcessBeforeInitialization(Object, String)
+			 * @see org.springframework.context.support.PostProcessorRegistrationDelegate.BeanPostProcessorChecker#postProcessBeforeInitialization(Object, String)
+			 */
 			wrappedBean = applyBeanPostProcessorsBeforeInitialization(wrappedBean, beanName);
 		}
 
@@ -1795,6 +1912,14 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 					beanName, "Invocation of init method failed", ex);
 		}
 		if (mbd == null || !mbd.isSynthetic()) {
+			/**
+			 * @see org.springframework.context.support.ApplicationContextAwareProcessor#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.context.support.ApplicationListenerDetector#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.beans.factory.annotation.InitDestroyAnnotationBeanPostProcessor#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.beans.factory.config.InstantiationAwareBeanPostProcessorAdapter#postProcessAfterInitialization(Object, String)
+			 * @see org.springframework.context.support.PostProcessorRegistrationDelegate.BeanPostProcessorChecker#postProcessAfterInitialization(Object, String)
+			 */
 			wrappedBean = applyBeanPostProcessorsAfterInitialization(wrappedBean, beanName);
 		}
 
