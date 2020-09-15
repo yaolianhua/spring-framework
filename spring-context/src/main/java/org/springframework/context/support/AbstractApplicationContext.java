@@ -61,12 +61,7 @@ import org.springframework.context.PayloadApplicationEvent;
 import org.springframework.context.ResourceLoaderAware;
 import org.springframework.context.annotation.ImportResource;
 import org.springframework.context.annotation.PropertySources;
-import org.springframework.context.event.ApplicationEventMulticaster;
-import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.context.event.ContextRefreshedEvent;
-import org.springframework.context.event.ContextStartedEvent;
-import org.springframework.context.event.ContextStoppedEvent;
-import org.springframework.context.event.SimpleApplicationEventMulticaster;
+import org.springframework.context.event.*;
 import org.springframework.context.expression.StandardBeanExpressionResolver;
 import org.springframework.context.weaving.LoadTimeWeaverAware;
 import org.springframework.context.weaving.LoadTimeWeaverAwareProcessor;
@@ -586,8 +581,12 @@ public abstract class AbstractApplicationContext extends DefaultResourceLoader
 				 * 		2.2 添加一个bean的后置处理器{@link org.springframework.context.annotation.ConfigurationClassPostProcessor.ImportAwareBeanPostProcessor}
 				 *
 				 * {@link org.springframework.context.event.EventListenerMethodProcessor#postProcessBeanFactory(ConfigurableListableBeanFactory)}
-				 * 初始化监听器工厂接口{@link org.springframework.context.event.EventListenerMethodProcessor#eventListenerFactories}
+				 * 1. 初始化监听器工厂接口{@link org.springframework.context.event.EventListenerMethodProcessor#eventListenerFactories}
 				 * @see org.springframework.context.event.DefaultEventListenerFactory
+				 * 2. 解析处理{@link org.springframework.context.event.EventListener}注解方法，
+				 * 	  将该注解方法所在类(监听器)加入到广播器{@link SimpleApplicationEventMulticaster}和{@link AbstractApplicationContext#applicationListeners}中
+				 * @see EventListenerMethodProcessor#afterSingletonsInstantiated()
+				 * @see SimpleApplicationEventMulticaster#defaultRetriever#addApplicationListener(ApplicationListener)
 				 *
 				 * 处理自定义实现的bean工厂后置处理器
 				 */
